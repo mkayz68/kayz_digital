@@ -1,0 +1,111 @@
+version: "3.8"
+services:
+  traefik:
+    image: traefik:v2.3.2
+    container_name: traefik_kayz
+    hostname: traefik
+    ports: # partage des ports 80 et 443 sur la machine hôte
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Traefik utilise la socket docker pour observer les containers qui sont up / down
+      - ./traefik.toml:/etc/traefik/traefik.toml # dossier par défaut dans lequel traefik va chercher la configuration
+    labels:
+      - "traefik.enable=true" # active la gestion de ce container par Traefik
+      - "traefik.http.routers.traefik-api.rule=Host(`docker.localhost`)" # indique à Traefik que le Host de la requête doit être 'localhost'
+      - "traefik.http.routers.traefik-api.service=api@internal" # associe la route au service interne de Traefik api@internal
+    restart: "always"
+    networks:
+      - proxy
+
+  php7.4:
+    container_name: php7.4_kayz
+    build: ./docker/
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=Host(`web.docker.localhost`)"
+    volumes:
+      - ./:/var/www/html/
+    environment:
+      PHP_OPCACHE_VALIDATE_TIMESTAMPS: "1"
+      PHP_OPCACHE_MAX_ACCELERATED_FILES: "10000"
+      PHP_OPCACHE_MEMORY_CONSUMPTION: "192"
+      PHP_OPCACHE_MAX_WASTED_PERCENTAGE: "10"
+
+    networks:
+      - proxy
+
+  mysql:
+    container_name: mysql5.7_kayz
+    image: mysql:5.7
+    restart: always
+    labels:
+      - "traefik.enable=true" # active la gestion de ce container par Traefik
+    volumes:
+      - ./db/:/var/lib/mysql/
+      # - ./database/:/docker-entrypoint-initdb.d
+    ports:
+      - 3306:3306
+    environment:
+      # MYSQL_DATABASE: championnat_ski
+      # MYSQL_USER: root
+      # MYSQL_PASSWORD:
+      MYSQL_ROOT_PASSWORD: test
+    networks:
+      - proxy
+
+  phpmyadmin:
+    container_name: phpmyadmin_kayz
+    image: phpmyadmin:latest
+    restart: always
+    depends_on:
+      - mysql
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.phpmyadmin.rule=Host(`pma.docker.localhost`)"
+    volumes:
+      - /sessions
+    environment:
+      - PMA_ARBITRARY=1
+      - PMA_HOST=mysql
+      - PMA_PORT=3306
+      - PMA_PASSWORD=test
+      - PMA_USER=root
+    networks:
+      - proxy
+
+  composer:
+    container_name: composer_kayz
+    image: composer:2.0.11
+    restart: always
+    command: install
+    working_dir: /var/www/html/
+    volumes:
+      - ./:/var/www/html/
+
+  mailhog:
+    container_name: mailhog_kayz
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - 1025:1025 # smtp server
+      - 8025:8025 # web ui
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailhog.rule=Host(`mho.docker.localhost`)"
+      - "traefik.http.routers.mailhog.entrypoints=web"
+      - "traefik.services.mailhog.loadbalancer.server.port=8025"
+    networks:
+      - proxy
+
+
+networks:
+  proxy:
+    name: proxy
+
+
+# - "traefik.enable=true"
+# - "traefik.tcp.routers.mysql.tls=false"
+# - "traefik.tcp.routers.mysql.rule=HostSNI(`*`)"
+# - "traefik.tcp.routers.mysql.entrypoints=mysql"
+# - "traefik.tcp.routers.mysql.service=mysql-service"
+# - "traefik.tcp.services.mysql-service.loadbalancer.server.port=3306"
